@@ -723,7 +723,7 @@ class fuel:
         if Tvals is None:
             print("Tvals not specified, using [273.15, Tb_i] for each compound.")
             # Initialize as zeros for now, calculated for each compound later
-            T = np.zeros(20) * units.K
+            T = np.zeros(20) * units.ureg.K
         elif len(Tvals) == 2:
             T = np.linspace(Tvals[0], Tvals[1], 20)
         elif len(Tvals) > 2:
@@ -739,8 +739,11 @@ class fuel:
             """Antoine equation for vapor pressure."""
             return A - B / (T + C)
 
-        # Determine conversion factor for pressure in MKS, CGS, bar, or atm
-        D = ustrip((1 * units.Pa).to(unit))
+        # "mks" (meter-kilogram-second) and "cgs" (centimeter-gram-second) are unit
+        # *systems*, not units themselves, so resolve them to their native pressure
+        # unit (Pascal and barye, respectively) before converting.
+        pressure_unit = {"mks": "Pa", "cgs": "barye"}.get(unit.lower(), unit)
+        D = ustrip((1 * units.ureg.Pa).to(pressure_unit))
 
         # Fit Antoine coefficients for each compound
         A = np.zeros(self.num_compounds)
@@ -749,7 +752,7 @@ class fuel:
         for i in range(self.num_compounds):
             # Update T if not specified
             if Tvals is None:
-                T = np.linspace(273.15, Tb[i], 20) * units.K
+                T = np.linspace(273.15, Tb[i], 20) * units.ureg.K
             Pvals = np.zeros(len(T))
             for k in range(len(T)):
                 Pval = 1 / D * self.psat(T[k], correlation=correlation)[i]
@@ -777,7 +780,7 @@ class fuel:
         :rtype: units.Quantity
         """
 
-        Tstp = 298.0 * units.Kelvin
+        Tstp = 298.0 * units.ureg.Kelvin
 
         Tc = self.Tc
         omega = self.omega
@@ -834,9 +837,9 @@ class fuel:
         T: units.Quantity,
         *,
         unit: str = "m^2/s",
-        sigma_gas: units.Quantity = 3.62e-10 * units.m,
-        epsilonByKB_gas: units.Quantity = 97.0 * units.K,
-        MW_gas: units.Quantity = 28.97e-3 * units.kg / units.mol,
+        sigma_gas: units.Quantity = 3.62e-10 * units.ureg.m,
+        epsilonByKB_gas: units.Quantity = 97.0 * units.ureg.K,
+        MW_gas: units.Quantity = 28.97e-3 * units.ureg.kg / units.ureg.mol,
         correlation: Literal["Wilke", "Tee"] = "Tee",
     ) -> units.Quantity:
         """
@@ -1175,7 +1178,7 @@ class fuel:
             print("Tvals not specified, using [273.15, min(Tb_mix)] for mixture.")
             Xi = self.Y2X(Yi)
             Tb = mixing_rule(self.Tb, Xi).to("K")
-            T = np.linspace(273.15 * units.K, np.min(Tb), 20)
+            T = np.linspace(273.15 * units.ureg.K, np.min(Tb), 20)
         elif len(Tvals) == 2:
             T = np.linspace(Tvals[0], Tvals[1], 20)
         elif len(Tvals) > 2:
@@ -1203,8 +1206,11 @@ class fuel:
             """
             return A - B / (T + C)
 
-        # Determine conversion factor for pressure in MKS, CGS, bar, or atm
-        D = ustrip((1 * units.Pa).to(unit))
+        # "mks" (meter-kilogram-second) and "cgs" (centimeter-gram-second) are unit
+        # *systems*, not units themselves, so resolve them to their native pressure
+        # unit (Pascal and barye, respectively) before converting.
+        pressure_unit = {"mks": "Pa", "cgs": "barye"}.get(unit.lower(), unit)
+        D = ustrip((1 * units.ureg.Pa).to(pressure_unit))
 
         Pvals = np.zeros(len(T))
         for k in range(len(T)):

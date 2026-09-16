@@ -193,7 +193,7 @@ def create_individual_compounds_dataframe(
     for name, (quantity, cgs_unit, mks_unit) in properties.items():
         unit = cgs_unit if units == "cgs" else mks_unit
         data_dict[name] = (
-            quantity.to(unit).value if hasattr(quantity, "to") else quantity  # ty: ignore[call-non-callable]
+            quantity.to(unit).magnitude if hasattr(quantity, "to") else quantity  # ty: ignore[call-non-callable]
         )
 
     return pd.DataFrame(data_dict)
@@ -258,7 +258,7 @@ def create_mixture_dataframe(
     for name, (quantity, cgs_unit, mks_unit) in properties.items():
         unit = cgs_unit if units == "cgs" else mks_unit
         data_dict[name] = (
-            quantity.to(unit).value if hasattr(quantity, "to") else quantity  # ty: ignore[call-non-callable]
+            quantity.to(unit).magnitude if hasattr(quantity, "to") else quantity  # ty: ignore[call-non-callable]
         )
 
     return pd.DataFrame(data_dict)
@@ -442,7 +442,7 @@ def export_pele(
         else:
             rho = fuel.density(ref_T, unit=rho_unit)
 
-        df["rho"] = rho.value
+        df["rho"] = rho.magnitude
 
         # Get Antoine coefficients
         if psat_antoine:

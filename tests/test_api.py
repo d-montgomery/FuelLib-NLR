@@ -201,8 +201,8 @@ class FuelLibFunctionEvalTestCase(unittest.TestCase):
             "decane": fl.fuel("decane"),
             "posf10325": fl.fuel("posf10325"),
         }
-        cls.T = fl.units.Quantity(320.0, fl.units.K)
-        cls.p = fl.units.Quantity(101325.0, fl.units.Pa)
+        cls.T = fl.units.Quantity(320.0, fl.units.ureg.K)
+        cls.p = fl.units.Quantity(101325.0, fl.units.ureg.Pa)
 
     def _assert_finite_and_positive(self, value):
         arr = np.asarray(value)
@@ -325,7 +325,7 @@ class FuelLibFunctionEvalTestCase(unittest.TestCase):
 
                 # Antoine coefficient fits (individual compounds)
                 A, B, C, D = fuel.psat_antoine_coeffs(
-                    Tvals=np.array([300.0, 340.0]) * fl.units.K,
+                    Tvals=np.array([300.0, 340.0]) * fl.units.ureg.K,
                     unit="atm",
                     correlation="Lee-Kesler",
                 )
@@ -343,7 +343,7 @@ class FuelLibFunctionEvalTestCase(unittest.TestCase):
                 # Antoine coefficient fits (mixture)
                 A_mix, B_mix, C_mix, D_mix = fuel.mixture_vapor_pressure_antoine_coeffs(
                     Yi,
-                    Tvals=np.array([300.0, 340.0]) * fl.units.K,
+                    Tvals=np.array([300.0, 340.0]) * fl.units.ureg.K,
                     unit="bar",
                     correlation="Lee-Kesler",
                 )

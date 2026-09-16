@@ -80,7 +80,7 @@ def create_data_dict(
     data_dict = {}
     for name, (quantity, cgs_unit, mks_unit) in properties.items():
         unit = cgs_unit if units == "cgs" else mks_unit
-        data_dict[f"{name} ({unit})"] = quantity.to(unit).value
+        data_dict[f"{name} ({unit})"] = quantity.to(unit).magnitude
     return data_dict
 
 
@@ -107,13 +107,13 @@ def export_converge(
     :type units: str, optional (default: "mks")
 
     :param temp_min: Minimum temperature for the property calculations.
-    :type temp_min: fl.units.Quantity, optional (default: 0 * fl.units.K)
+    :type temp_min: fl.units.Quantity, optional (default: 0 * fl.units.ureg.K)
 
     :param temp_max: Maximum temperature for the property calculations.
-    :type temp_max: fl.units.Quantity, optional (default: 1000 * fl.units.K)
+    :type temp_max: fl.units.Quantity, optional (default: 1000 * fl.units.ureg.K)
 
     :param temp_step: Step size for temperature.
-    :type temp_step: fl.units.Quantity, optional (default: 10 * fl.units.K)
+    :type temp_step: fl.units.Quantity, optional (default: 10 * fl.units.ureg.K)
 
     :param temp_unit: Unit of temperature (e.g., "K" for Kelvin).
     :type temp_unit: str, optional (default: "K")
@@ -512,7 +512,7 @@ def export_converge(
             "Component": fuel.compounds,
             "Mass Fraction": fuel.Y_0,
             "Mole Fraction": fuel.Y2X(fuel.Y_0),
-            f"Molecular Weight ({MW_units})": fuel.MW.to(MW_units).value,
+            f"Molecular Weight ({MW_units})": fuel.MW.to(MW_units).magnitude,
         }
         export_properties_to_csv(composition_file, composition_data)
 

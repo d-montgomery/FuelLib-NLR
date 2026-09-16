@@ -30,7 +30,7 @@ def mixing_rule(
     :rtype: units.Quantity
     """
     num_comps = len(var_n)
-    var_mix = units.Quantity(0.0, var_n.unit)
+    var_mix = units.Quantity(0.0, var_n.units)
     for i in range(num_comps):
         for j in range(num_comps):
             if pseudo_prop.casefold() == "geometric":
