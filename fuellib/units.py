@@ -11,6 +11,13 @@ The registry is also registered as Pint's *application registry*
 (:func:`pint.set_application_registry`), so ``pint.Quantity(...)`` objects created
 elsewhere (without importing ``fl.units.ureg``) remain compatible with FuelLib's
 quantities.
+
+The registry is case-sensitive (Pint's default). A case-insensitive registry was
+considered, but it makes some common abbreviations ambiguous (e.g. ``"kg"``
+resolves to ``kilogauss`` instead of ``kilogram``). Instead, the handful of
+capitalized temperature unit strings already used across FuelLib's API
+(``"Celsius"``, ``"Kelvin"``, ``"Fahrenheit"``) are registered as explicit
+aliases below.
 """
 
 import numpy as np
@@ -18,7 +25,12 @@ import pint
 
 #: Shared unit registry used by all FuelLib Quantities. Access unit symbols via
 #: e.g. ``ureg.K``, ``ureg.Pa``, or build Quantities with :data:`Quantity`.
-ureg = pint.UnitRegistry(case_sensitive=False)
+ureg = pint.UnitRegistry()
+
+# Register capitalized aliases for temperature units used across FuelLib's API.
+ureg.define("@alias degree_Celsius = Celsius")
+ureg.define("@alias degree_Fahrenheit = Fahrenheit")
+ureg.define("@alias kelvin = Kelvin")
 
 # Make this the process-wide default registry so bare ``pint.Quantity(...)``
 # objects created elsewhere are still compatible with FuelLib's Quantities.
