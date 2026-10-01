@@ -1,0 +1,6 @@
+fuellib.correlate.components.freeze\_point\_boehm
+=================================================
+
+.. currentmodule:: fuellib.correlate.components
+
+.. autofunction:: freeze_point_boehm

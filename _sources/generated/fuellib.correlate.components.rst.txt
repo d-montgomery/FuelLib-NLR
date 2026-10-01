@@ -1,0 +1,27 @@
+﻿fuellib.correlate.components
+============================
+
+.. automodule:: fuellib.correlate.components
+   :no-members:
+
+   
+   .. rubric:: Functions
+
+   .. autosummary::
+      :toctree:
+      :nosignatures:
+   
+      density
+      diffusion_coeffs_wilke
+      dynamic_viscosity_dutt
+      freeze_point_boehm
+      kinematic_viscosity_dutt
+      latent_heat_vaporization
+      liquid_mass_specific_heat
+      molar_liquid_volume
+      molar_specific_heat
+      saturated_vapor_pressure
+      saturated_vapor_pressure_antoine_coeffs
+      surface_tension
+      thermal_conductivity_latini
+   
