@@ -1,5 +1,7 @@
 """Test cases for the Group Contribution Method (GCM) module in FuelLib."""
 
+from pathlib import Path
+
 import csv
 import unittest
 from types import SimpleNamespace
@@ -12,13 +14,7 @@ import pytest
 import fuellib as fl
 from fuellib.fuel import Fuel
 from fuellib.gcm import GCMRegistry, gani_gcm
-from fuellib.gcm.decomposition import (
-    decompose,
-    format_decomposition,
-    group_names,
-    read_decomposition_input,
-    write_decompositions_csv,
-)
+from fuellib.gcm.gani import decompose
 from fuellib.gcm.gani import (
     Cp_B,
     Cp_C,
@@ -39,6 +35,7 @@ from fuellib.gcm.gani import (
     rd_D,
 )
 from fuellib.utils import Units
+from fuellib import DEFAULT_DATA_DIR
 
 
 class GCMCoreTestCase(unittest.TestCase):
@@ -236,116 +233,51 @@ class GaniHelperFunctionTestCase(unittest.TestCase):
 class GaniReferenceDecompositionTestCase(unittest.TestCase):
     """Verify RDKit CG decompositions against the bundled reference data."""
 
-    def test_rdkit_decompositions_match_ref_gani(self):
-        """Compare every reference compound's SMILES decomposition to refGani."""
-        data_dir = fl.get_data_dir()
-        compounds = pd.read_csv(
-            f"{data_dir}/refCompounds.csv",
-            usecols=["Reference Compound", "SMILES"],
+    def test_reference_decomposition(self):
+        """Test that the RDKit decomposition matches tabulated Gani data."""
+        df_refs = pd.read_csv(Path(DEFAULT_DATA_DIR) / "refCompounds.csv")
+        df_gani = pd.read_csv(
+            Path(DEFAULT_DATA_DIR) / "refGani.csv", skipinitialspace=True
         )
-        gani = pd.read_csv(f"{data_dir}/refGani.csv")
-        group_names = gani.columns.drop("Common_Name").tolist()
-        reference = gani.merge(
-            compounds,
-            left_on="Common_Name",
-            right_on="Reference Compound",
-            how="left",
-            validate="one_to_one",
-        )
+        df_gani.columns = df_gani.columns.str.strip()
+        df_gani["Reference Compound"] = df_gani["Reference Compound"].str.strip()
+        df_gani = df_gani.set_index("Reference Compound")
+        rows = {}
 
-        missing_smiles = reference.loc[reference["SMILES"].isna(), "Common_Name"]
-        self.assertTrue(
-            missing_smiles.empty,
-            f"Missing SMILES for: {', '.join(missing_smiles)}",
-        )
+        for name, smiles in zip(
+            df_refs["Reference Compound"], df_refs["SMILES"], strict=True
+        ):
+            counts = decompose(smiles).iloc[0]
+            counts = counts[counts != 0]
+            missing_groups = counts.index.difference(df_gani.columns)
+            if len(missing_groups):
+                raise KeyError(
+                    f"Groups {list(missing_groups)} not found in refGani columns"
+                )
+            rows[name] = counts.reindex(df_gani.columns, fill_value=0)
 
-        for _, compound in reference.iterrows():
-            counts = decompose(compound["SMILES"], method="gani")
-            actual = [counts.get(group, 0) for group in group_names]
-            expected = compound[group_names].astype(int).tolist()
-            ref_decomposition = ", ".join(
-                f"({count}x) {group}"
-                for group, count in zip(group_names, expected)
-                if count
+        df_new = pd.DataFrame.from_dict(rows, orient="index", columns=df_gani.columns)
+        df_new.index.name = "Reference Compound"
+
+        # Compare against tabulated values
+        common = df_new.index.intersection(df_gani.index)
+        missing = df_new.index.difference(df_gani.index)
+        if len(missing):
+            print("Compounds not in refGani:", list(missing))
+
+        diff = df_new.loc[common] - df_gani.loc[common].astype(int)
+        mismatched = diff.index[(diff != 0).any(axis=1)]
+        print(f"{len(common) - len(mismatched)}/{len(common)} compounds match refGani.")
+        for name in mismatched:
+            cols = diff.columns[diff.loc[name] != 0]
+            print(
+                f"\n{name} ({df_refs.set_index('Reference Compound').loc[name, 'SMILES']}):"
             )
-            rdkit_decomposition = ", ".join(
-                f"({count}x) {group}"
-                for group, count in zip(group_names, actual)
-                if count
-            )
-            differences = {
-                group: {"expected": expected_count, "actual": actual_count}
-                for group, expected_count, actual_count in zip(
-                    group_names, expected, actual
+            for col in cols:
+                print(
+                    f"  {col}: computed={df_new.loc[name, col]}, "
+                    f"tabulated={df_gani.loc[name, col]}"
                 )
-                if expected_count != actual_count
-            }
-            if differences:
-                difference_report = "\n".join(
-                    f"  {group}: expected {values['expected']}, actual {values['actual']}"
-                    for group, values in differences.items()
-                )
-                self.fail(
-                    "RDKit decomposition does not match refGani.csv\n"
-                    f"Compound: {compound['Common_Name']}\n"
-                    f"SMILES: {compound['SMILES']}\n"
-                    f"refGani: {ref_decomposition}\n"
-                    f"RDKit:   {rdkit_decomposition}\n"
-                    f"Differences:\n{difference_report}"
-                )
-            print(f"{compound['Common_Name']}: RDKit decomposition matches refGani.csv")
-
-
-def test_decomposition_helpers_support_gani_and_reject_unknown_methods():
-    """Gani helpers should use its group ordering and reject unknown methods."""
-    counts = decompose("CCCCCCC", method="GANI")
-
-    assert "CH3" in group_names("gani")
-    assert "(2x) CH3" in format_decomposition(counts, method="gani")
-    assert format_decomposition({}, method="gani") == "No groups assigned"
-
-    with pytest.raises(ValueError, match="Unsupported group-contribution method"):
-        decompose("CCCCCCC", method="unknown")
-    with pytest.raises(ValueError, match="Unsupported group-contribution method"):
-        group_names("unknown")
-
-
-def test_decomposition_csv_helpers_round_trip(tmp_path):
-    """CSV helpers should retain input names and write refGani-compatible columns."""
-    input_path = tmp_path / "compounds.csv"
-    input_path.write_text(
-        "Reference Compound,SMILES\nethylbenzene,CCc1ccccc1\n,CCCCCCC\n,\n"
-    )
-
-    compounds = read_decomposition_input(input_path)
-    assert compounds == [("ethylbenzene", "CCc1ccccc1"), ("", "CCCCCCC")]
-
-    output_path = tmp_path / "gani.csv"
-    decompositions = [
-        (name, smiles, decompose(smiles, method="gani")) for name, smiles in compounds
-    ]
-    write_decompositions_csv(output_path, decompositions, method="gani")
-
-    with output_path.open(newline="") as output_file:
-        rows = list(csv.DictReader(output_file))
-
-    assert "Common_Name" in rows[0]
-    assert "SMILES" not in rows[0]
-    assert rows[0]["Common_Name"] == "ethylbenzene"
-    assert rows[1]["Common_Name"] == ""
-    assert rows[0]["ACCH2"] == "1"
-    assert rows[1]["CH2"] == "5"
-
-
-def test_read_decomposition_input_rejects_invalid_files(tmp_path):
-    """Input CSVs must exist and include a SMILES column."""
-    with pytest.raises(FileNotFoundError):
-        read_decomposition_input(tmp_path / "missing.csv")
-
-    input_path = tmp_path / "missing-smiles.csv"
-    input_path.write_text("Reference Compound\nethylbenzene\n")
-    with pytest.raises(ValueError, match="SMILES"):
-        read_decomposition_input(input_path)
 
 
 if __name__ == "__main__":

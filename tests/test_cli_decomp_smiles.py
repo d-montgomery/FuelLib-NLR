@@ -5,7 +5,7 @@ import sys
 
 import pytest
 
-from fuellib.cli.decomp_smiles import main
+from fuellib.cli.decomp_smiles import decompose_smiles
 
 
 def test_writes_named_decompositions(monkeypatch, capsys, tmp_path):
@@ -16,6 +16,7 @@ def test_writes_named_decompositions(monkeypatch, capsys, tmp_path):
         "argv",
         [
             "fl-decomp-smiles",
+            "--smiles",
             "CCc1ccccc1",
             "CCCCCCC",
             "--name",
@@ -23,21 +24,19 @@ def test_writes_named_decompositions(monkeypatch, capsys, tmp_path):
             "n-heptane",
             "--method",
             "gani",
-            "--output-file",
+            "--out",
             str(output_path),
         ],
     )
 
-    assert main() == 0
-    output = capsys.readouterr().out
-    assert "ethylbenzene (CCc1ccccc1):" in output
-    assert "n-heptane (CCCCCCC):" in output
+    decompose_smiles()
+    assert f"written to {output_path}" in capsys.readouterr().out
 
     with output_path.open(newline="") as output_file:
         rows = list(csv.DictReader(output_file))
-    assert rows[0]["Common_Name"] == "ethylbenzene"
+    assert rows[0]["Reference Compound"] == "ethylbenzene"
     assert rows[0]["ACH"] == "5"
-    assert rows[1]["Common_Name"] == "n-heptane"
+    assert rows[1]["Reference Compound"] == "n-heptane"
     assert rows[1]["CH2"] == "5"
 
 
@@ -47,16 +46,18 @@ def test_reads_input_file(monkeypatch, capsys, tmp_path):
     input_path.write_text("Reference Compound,SMILES\nn-heptane,CCCCCCC\n")
     monkeypatch.setattr(sys, "argv", ["fl-decomp-smiles", "-i", str(input_path)])
 
-    assert main() == 0
-    assert "n-heptane (CCCCCCC): (2x) CH3, (5x) CH2" in capsys.readouterr().out
+    decompose_smiles()
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0].split() == ["CH3", "CH2"]
+    assert lines[-1].split() == ["n-heptane", "2", "5"]
 
 
 @pytest.mark.parametrize(
     "arguments",
     [
         [],
-        ["CCCCCCC", "CCc1ccccc1", "--name", "one-name"],
-        ["CCCCCCC", "--method", "unknown"],
+        ["-s", "CCCCCCC", "CCc1ccccc1", "--name", "one-name"],
+        ["-s", "CCCCCCC", "--method", "unknown"],
     ],
 )
 def test_rejects_invalid_arguments(monkeypatch, arguments):
@@ -64,5 +65,5 @@ def test_rejects_invalid_arguments(monkeypatch, arguments):
     monkeypatch.setattr(sys, "argv", ["fl-decomp-smiles", *arguments])
 
     with pytest.raises(SystemExit) as error:
-        main()
+        decompose_smiles()
     assert error.value.code == 2

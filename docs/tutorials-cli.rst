@@ -46,14 +46,14 @@ functional-group counts. ``gani`` is currently the supported method and default.
 
 .. code-block:: bash
 
-    fl-decomp-smiles "CCc1ccccc1"
-    fl-decomp-smiles "CCc1ccccc1" --name ethylbenzene --output gani.csv
+    fl-decomp-smiles --smiles "CCc1ccccc1"
+    fl-decomp-smiles --smiles "CCc1ccccc1" --name ethylbenzene --out gani.csv
 
 Use ``--name`` to label one SMILES and ``-o`` to write its decomposition to CSV:
 
 .. code-block:: bash
 
-    fl-decomp-smiles "CCc1ccccc1" -n ethylbenzene -o gani.csv
+    fl-decomp-smiles -s "CCc1ccccc1" -n ethylbenzene -o gani.csv
 
 For batch processing, ``-i`` accepts a CSV with a required ``SMILES`` column
 and an optional ``Reference Compound`` column:
@@ -68,7 +68,16 @@ and an optional ``Reference Compound`` column:
 
     fl-decomp-smiles -i compounds.csv -o gani.csv
 
-The output uses the ``refGani.csv`` group columns and a ``Common_Name`` column.
+The output uses the ``refGani.csv`` group columns and a ``Reference Compound`` column.
+
+.. warning::
+    The automated decomposition is not perfect and every result should be verified
+    against the compound's structure and the `Gani table <https://github.com/NatLabRockies/FuelLib/blob/main/fuellib/gcm/gani.csv>`_
+    before it is added to ``refGani.csv``. Groups are assigned by priority, and
+    overlapping groups can conflict. For example, the non-aromatic double bond in
+    indene (``C1C=Cc2ccccc12``) is not captured: the vinylic carbon bonded to the ring
+    is assigned to ``ACCH`` (which takes priority over ``CH=CH``), and the other vinylic
+    carbon falls back to ``CH``. The resulting counts must be corrected by hand.
 
 Unit Conversion Tools
 ~~~~~~~~~~~~~~~~~~~~~~

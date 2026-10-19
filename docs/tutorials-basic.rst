@@ -39,7 +39,13 @@ Optionally, measured property data can be provided in ``propertiesData/<fuel_nam
 Decomposing Fuel Components into Fundamental Groups
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The decomposition process is a manual process that requires knowledge of the chemical structure of each component in the fuel. 
+The decomposition process requires knowledge of the chemical structure of each component in the fuel.
+Decompositions can be constructed by hand, as described below, or generated automatically from SMILES
+strings with the ``fl-decomp-smiles`` command-line tool (see `SMILES Decomposition <tutorials-cli.html#smiles-decomposition>`_)
+or :func:`fuellib.gcm.gani.decompose`. Automated decompositions are not perfect and should always be
+verified by hand. For example, the non-aromatic double bond in indene is not captured due to conflicting
+group priorities.
+
 For example, consider a multicomponent fuel consisting of heptane (C7H16), decane (C10H22), and (1,5-dimethylhexyl)cyclohexane (C14H28).
 
 .. figure:: /figures/decomp-example.png

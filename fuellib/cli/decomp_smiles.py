@@ -3,48 +3,38 @@
 import argparse
 from pathlib import Path
 
-from ..gcm.decomposition import (
-    UnsupportedGroupError,
-    decompose,
-    format_decomposition,
-    read_decomposition_input,
-    write_decompositions_csv,
-)
+import pandas as pd
+
+from fuellib import gcm
 
 
-def main() -> int:
+def decompose_smiles() -> None:
     """Decompose supplied SMILES strings and optionally write group counts to CSV."""
-    parser = argparse.ArgumentParser(
-        description="Decompose SMILES strings into functional-group counts.",
-        epilog="""Examples:
-  %(prog)s "CCc1ccccc1"
-  %(prog)s "CCc1ccccc1" -n ethylbenzene -o gani.csv
-    %(prog)s "CCc1ccccc1" "CCCCCCC" -n ethylbenzene n-heptane -o gani.csv
-  %(prog)s -i fuel.csv -m gani -o gani.csv
-
-Input CSV files require a SMILES column. An optional Reference Compound column is
-written as Common_Name in the output CSV.""",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
+    parser = argparse.ArgumentParser()
     parser.add_argument(
-        "smiles",
-        nargs="*",
-        metavar="SMILES",
+        "-s",
+        "--smiles",
+        nargs="+",
         help="One or more SMILES strings to decompose.",
     )
     parser.add_argument(
         "-n",
         "--name",
         nargs="+",
-        metavar="NAME",
-        help="Optional names corresponding to the command-line SMILES strings.",
+        help=(
+            "Optional reference compound names, one for each SMILES string given "
+            "with --smiles."
+        ),
     )
     parser.add_argument(
         "-i",
-        "--input-file",
+        "--input",
         type=Path,
         metavar="CSV",
-        help="CSV file containing SMILES.",
+        help=(
+            "Optional CSV file with a 'SMILES' column and an optional "
+            "'Reference Compound' column."
+        ),
     )
     parser.add_argument(
         "-m",
@@ -55,46 +45,46 @@ written as Common_Name in the output CSV.""",
     )
     parser.add_argument(
         "-o",
-        "--output",
-        "--output-file",
+        "--out",
         type=Path,
         metavar="CSV",
-        help="Optional CSV file for the decomposition counts.",
+        help="Optional CSV file for the decomposition counts (default: print).",
     )
-    arguments = parser.parse_args()
-
-    if arguments.name is not None and len(arguments.name) != len(arguments.smiles):
-        parser.error("--name requires one name for each command-line SMILES string.")
-    if arguments.name is not None and arguments.input_file is not None:
-        parser.error("--name cannot be used with --input-file.")
-
-    names = arguments.name or [""] * len(arguments.smiles)
-    compounds = list(zip(names, arguments.smiles))
-    if arguments.input_file is not None:
-        try:
-            compounds.extend(read_decomposition_input(arguments.input_file))
-        except (OSError, ValueError) as error:
-            parser.error(str(error))
-    if not compounds:
-        parser.error("Provide one or more SMILES strings or an input file.")
-
-    decompositions: list[tuple[str, str, dict[str, int]]] = []
-    for reference_compound, smiles in compounds:
-        try:
-            counts = decompose(smiles, method=arguments.method)
-        except (UnsupportedGroupError, ValueError) as error:
-            parser.error(f"Cannot decompose {smiles!r}: {error}")
-        decompositions.append((reference_compound, smiles, counts))
-        label = f"{reference_compound} ({smiles})" if reference_compound else smiles
-        print(f"{label}: {format_decomposition(counts, method=arguments.method)}")
-
-    if arguments.output is not None:
-        write_decompositions_csv(
-            arguments.output, decompositions, method=arguments.method
+    args = parser.parse_args()
+    if not args.smiles and not args.input:
+        parser.error(
+            "Provide one or more SMILES strings or an input CSV file to decompose."
         )
-        print(f"Wrote {len(decompositions)} decomposition(s) to {arguments.output}")
-    return 0
+    if args.name and (not args.smiles or len(args.name) != len(args.smiles)):
+        parser.error("Provide exactly one --name for each --smiles string.")
+
+    if args.method.casefold() == "gani":
+        decompose = gcm.gani.decompose
+    else:
+        parser.error(f"Unsupported method: {args.method}")
+
+    labels: list[str] = []
+    smiles_list: list[str] = []
+    if args.smiles:
+        labels.extend(args.name or args.smiles)
+        smiles_list.extend(args.smiles)
+    if args.input:
+        input_df = pd.read_csv(args.input)
+        if "SMILES" not in input_df.columns:
+            parser.error("Input CSV must contain a 'SMILES' column.")
+        names = input_df.get("Reference Compound", input_df["SMILES"])
+        labels.extend(names.fillna(input_df["SMILES"]))
+        smiles_list.extend(input_df["SMILES"])
+
+    df = pd.concat([decompose(smiles) for smiles in smiles_list])
+    df.index = pd.Index(labels, name="Reference Compound")
+
+    if args.out:
+        df.to_csv(args.out)
+        print(f"Decomposition counts written to {args.out}")
+    else:
+        print(df.loc[:, (df != 0).any()].to_string())
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    decompose_smiles()
