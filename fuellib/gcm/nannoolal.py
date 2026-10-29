@@ -90,11 +90,6 @@ def _warn_zero_contributions(
     details = "\n".join(
         f"  {fuel.compounds[i]}: {TABLE.index[used[i]].tolist()}" for i in rows
     )
-    warnings.warn(
-        f"Nannoolal '{property_name}' has no published contribution for groups in "
-        f"the following compounds; using 0.0:\n{details}",
-        stacklevel=3,
-    )
 
 
 # Connected to N, O, F or Cl (aliphatic or aromatic N/O)
