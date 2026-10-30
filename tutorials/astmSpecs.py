@@ -40,9 +40,27 @@ astm_d7566_props = {
             "value": fl.Units.Quantity([48.8], "dimensionless"),
             # Note the target DCN is the "best case" from Edwards 2020 Table 17
     },
-    "Smoke Point": {
+    # Smoke point: meet option (1) OR option (2)
+    #   (1) Smoke point >= 25 mm
+    #   (2) Smoke point >= 18 mm AND naphthalenes <= 3 vol%
+    "Smoke Point (1)": {
         "min_value": fl.Units.Quantity([25], "mm"),
     },
+    "Smoke Point (2)": {
+        "min_value": fl.Units.Quantity([18], "mm"),
+    },
+    "Naphthalenes (2)": {
+        "max_value": fl.Units.Quantity([3.0], "percent"),
+    },
+}
+
+# Groups of requirements: all entries in an option must pass (AND), and at least
+# one option in a group must pass (OR).
+astm_d7566_either_or = {
+    "Smoke Point": [
+        ["Smoke Point (1)"],
+        ["Smoke Point (2)", "Naphthalenes (2)"],
+    ],
 }
 
 # Map each ASTM property to a FuelLib prediction
@@ -54,7 +72,9 @@ predictors = {
     "YSI": lambda T: fuel.mixture_yield_sooting_index(Y),
     "Heat of Combustion": lambda T: fuel.mixture_heat_of_combustion(Y),
     "DCN": lambda T: fuel.mixture_derived_cetane_number(Y),
-    "Smoke Point": lambda T: fuel.mixture_smoke_point(Y),
+    "Smoke Point (1)": lambda T: fuel.mixture_smoke_point(Y),
+    "Smoke Point (2)": lambda T: fuel.mixture_smoke_point(Y),
+    "Naphthalenes (2)": lambda T: fuel.mixture_naphthalenes_content(Y),
 }
 
 
@@ -118,14 +138,43 @@ header = (
     f"{'T':>12}  {'Units':<10}Status"
 )
 print(f"\nASTM D7566 properties for fuel: {fuel.name}\n")
+results = {
+    prop: list(evaluate(prop, criteria)) for prop, criteria in astm_d7566_props.items()
+}
+statuses = {prop: [row[-1] for row in rows] for prop, rows in results.items()}
+
+# Resolve either/or requirements: hide rows of options that do not apply.
+# The first option that is met is the applicable one. If none are met, every
+# option is shown so the shortfalls are visible.
+hidden = set()
+group_summary = []
+for group, options in astm_d7566_either_or.items():
+    option_passes = [
+        all(s == "PASS" for prop in option for s in statuses[prop])
+        for option in options
+    ]
+    if any(option_passes):
+        i = option_passes.index(True)
+        hidden |= {p for option in options for p in option} - set(options[i])
+        group_summary.append(f"{group}: PASS (option {i + 1}: {' AND '.join(options[i])})")
+    else:
+        group_summary.append(f"{group}: FAIL (no option met)")
+
 print(header)
 print("-" * len(header))
-for prop, criteria in astm_d7566_props.items():
-    for pred, lo, hi, val, T, units, status in evaluate(prop, criteria):
+for prop, rows in results.items():
+    if prop in hidden:
+        continue
+    for pred, lo, hi, val, T, units, status in rows:
         T_str = "-" if T is None else f"{T.to('celsius').magnitude:.1f} C"
         print(
             f"{prop:<18}{_fmt(pred, units):>12}{_fmt(lo, units):>10}"
             f"{_fmt(hi, units):>10}{_fmt(val, units):>10}{T_str:>12}  "
             f"{f'{units:~P}':<12}{status}"
         )
+
+# Summarize requirements where one of several options must be met
+print("\nEither/or requirements:\n")
+for line in group_summary:
+    print(line)
 

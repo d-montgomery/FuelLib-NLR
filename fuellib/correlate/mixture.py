@@ -851,3 +851,26 @@ def aromatics_content(
     Vi = helpers.mass_fractions_to_volume_fractions(fuel, Yi, constants.T_stp)
     is_aromatic = np.array(fuel.hc_type) == "aromatic"
     return Units.Quantity(np.sum(Vi.magnitude[is_aromatic]), "").to("percent")
+
+
+def naphthalenes_content(
+    fuel: "Fuel",
+    Yi: types.Quantity1D | None = None,
+) -> types.Quantity0D:
+    """Calculate the naphthalenes content of the fuel mixture.
+
+    Sums the liquid volume fractions (evaluated at standard temperature) of all
+    components identified as naphthalene or alkylated naphthalenes by
+    `fuel.is_naphthalene`.
+
+    Args:
+        fuel: Fuel object.
+        Yi: Mass fractions of each compound in the mixture.
+            Defaults to `fuel.Y_0` (initial mass fractions).
+
+    Returns:
+        Naphthalenes content of the mixture in volume percent.
+    """
+    Yi = Yi if Yi is not None else fuel.Y_0
+    Vi = helpers.mass_fractions_to_volume_fractions(fuel, Yi, constants.T_stp)
+    return Units.Quantity(np.sum(Vi.magnitude[fuel.is_naphthalene]), "").to("percent")
