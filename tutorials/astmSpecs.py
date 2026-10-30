@@ -3,12 +3,10 @@
 import numpy as np
 
 import fuellib as fl
+from fuellib.simulate.distillation import greenfield
 
-fuel_name = "posf11498"
+fuel_name = "posf10325"
 fuel_dir = None
-
-fuel_name = "eu_blind_fuel_e"
-fuel_dir = "/Users/dmontgo2/Documents/FuelLib-FuelData/fuelData"
 
 use_ref_props = True
 viscosity_corr = "Nannoolal"  # "Dutt" (Default) or "Nannoolal"
@@ -56,6 +54,21 @@ astm_d7566_props = {
     "Naphthalenes (2)": {
         "max_value": fl.Units.Quantity([3.0], "percent"),
     },
+    # Distillation temperature (D86). Entries with only "units" are report-only.
+    "Dist. T10": {
+        "max_value": fl.Units.Quantity([205], "celsius"),
+    },
+    "Dist. T50": {"units": "celsius"},
+    "Dist. T90": {"units": "celsius"},
+    "Dist. FBP": {
+        "max_value": fl.Units.Quantity([300], "celsius"),
+    },
+    "Dist. T50 - T10": {
+        "min_value": fl.Units.Quantity([15], "delta_degC"),
+    },
+    "Dist. T90 - T10": {
+        "min_value": fl.Units.Quantity([40], "delta_degC"),
+    },
 }
 
 # Groups of requirements: all entries in an option must pass (AND), and at least
@@ -66,6 +79,16 @@ astm_d7566_either_or = {
         ["Smoke Point (2)", "Naphthalenes (2)"],
     ],
 }
+
+_d86_cache = {}
+
+
+def d86():
+    """Simulate the D86 distillation curve once and reuse it."""
+    if "result" not in _d86_cache:
+        _d86_cache["result"] = greenfield.distill(fuel, Y)
+    return _d86_cache["result"]
+
 
 # Map each ASTM property to a FuelLib prediction
 predictors = {
@@ -79,6 +102,12 @@ predictors = {
     "Smoke Point (1)": lambda T: fuel.mixture_smoke_point(Y),
     "Smoke Point (2)": lambda T: fuel.mixture_smoke_point(Y),
     "Naphthalenes (2)": lambda T: fuel.mixture_naphthalenes_content(Y),
+    "Dist. T10": lambda T: d86().temperature_at(0.10),
+    "Dist. T50": lambda T: d86().temperature_at(0.50),
+    "Dist. T90": lambda T: d86().temperature_at(0.90),
+    "Dist. FBP": lambda T: d86().T_vapor.to("K").max(),
+    "Dist. T50 - T10": lambda T: d86().temperature_at(0.50) - d86().temperature_at(0.10),
+    "Dist. T90 - T10": lambda T: d86().temperature_at(0.90) - d86().temperature_at(0.10),
 }
 
 
@@ -112,14 +141,20 @@ def evaluate(prop, criteria):
     temp_q = criteria.get("at_temperature")
 
     given = [q for q in (min_q, max_q, val_q) if q is not None]
-    if not given:
-        raise ValueError(f"No min_value, max_value, or value specified for {prop}.")
-    units = given[0].units
+    if given:
+        units = given[0].units
+    elif "units" in criteria:
+        units = fl.Units.Unit(criteria["units"])  # report-only property
+    else:
+        raise ValueError(f"No min_value, max_value, value, or units given for {prop}.")
 
     n = max(
-        len(np.atleast_1d(q.magnitude))
-        for q in (min_q, max_q, val_q, temp_q)
-        if q is not None
+        (
+            len(np.atleast_1d(q.magnitude))
+            for q in (min_q, max_q, val_q, temp_q)
+            if q is not None
+        ),
+        default=1,
     )
     mins, maxs, vals, temps = (_as_list(q, n) for q in (min_q, max_q, val_q, temp_q))
 

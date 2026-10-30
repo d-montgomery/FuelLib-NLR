@@ -10,6 +10,12 @@ temperatures; if no measurement exists at that temperature, the nearest measured
 temperature is used and the prediction is made at that same temperature so the
 comparison is like for like. Properties without a measurement are skipped.
 
+Distillation (T10, T50, T90, final boiling point and the T50 - T10 and T90 - T10
+spans) is predicted with the Greenfield et al. D86 simulation. The measured values
+are interpolated from the fuel's measured D86 curve (Temp = D86 temperature,
+Property_Value = percent recovered); the final boiling point is the temperature at
+100 % recovered.
+
 YSI and naphthalenes content are not compared because they are not measured in the
 property data.
 """
@@ -25,6 +31,7 @@ from matplotlib.patches import Circle
 
 import fuellib as fl
 from fuellib.data import DEFAULT_DATA_DIR
+from fuellib.simulate.distillation import greenfield
 
 # --- User settings ---
 custom_dir = Path("/Users/dmontgo2/Documents/FuelLib-FuelData/fuelData")
@@ -36,9 +43,84 @@ viscosity_corr = "Nannoolal"  # "Dutt" or "Nannoolal"
 flash_point_corr = "Alibakhshi"  # "Alibakhshi" or "Alqaheem"
 max_temp_gap = None  # Max |T_measured - T_target| in K to accept (None = any)
 band_tol = 0.10  # Default relative tolerance band (±) on the parity plots
+include_distillation = True  # D86 simulation is slow; False skips the distillation figure
 save_plot = False
 display_plot = True
 plot_path = Path(__file__).with_name("astm_accuracy.png")
+
+_d86_sim_cache: dict[str, greenfield.D86Result] = {}
+
+
+def d86_simulated(fuel: fl.Fuel) -> greenfield.D86Result:
+    """Simulate the D86 curve of a fuel once and reuse it."""
+    if fuel.name not in _d86_sim_cache:
+        _d86_sim_cache[fuel.name] = greenfield.distill(fuel, fuel.Y_0)
+    return _d86_sim_cache[fuel.name]
+
+
+def d86_measured(fuel: fl.Fuel) -> tuple[np.ndarray, np.ndarray] | None:
+    """Return (fraction recovered, D86 temperature in K) of the measured curve."""
+    if fuel.propData is None:
+        return None
+    rows = fuel.propData[fuel.propData["Property"] == "Distillation"].copy()
+    rows["vol"] = pd.to_numeric(rows["Property_Value"], errors="coerce") / 100.0
+    rows["T_val"] = pd.to_numeric(rows["Temp"], errors="coerce")
+    rows = rows.dropna(subset=["vol", "T_val"]).sort_values("vol")
+    if len(rows) < 2:
+        return None
+    T_K = [_convert(t, tu, "K") for t, tu in zip(rows["T_val"], rows["Temp_Units"])]
+    return rows["vol"].to_numpy(), np.array(T_K)
+
+
+def d86_point(fuel: fl.Fuel, fraction: float) -> float | None:
+    """Measured D86 temperature in K at a recovered fraction (None if not covered)."""
+    curve = d86_measured(fuel)
+    if curve is None or not curve[0][0] <= fraction <= curve[0][-1]:
+        return None
+    return float(np.interp(fraction, *curve))
+
+
+def d86_span(fuel: fl.Fuel, hi: float, lo: float, measured: bool) -> float | None:
+    """Difference in K between the D86 temperatures at fractions `hi` and `lo`."""
+    if measured:
+        T_hi, T_lo = d86_point(fuel, hi), d86_point(fuel, lo)
+        return None if T_hi is None or T_lo is None else T_hi - T_lo
+    sim = d86_simulated(fuel)
+    return float(sim.temperature_at(hi).magnitude - sim.temperature_at(lo).magnitude)
+
+
+def d86_property(fraction: float, label: str) -> dict:
+    """Spec of the D86 temperature at a recovered fraction (1.0 = final boiling point)."""
+    return {
+        "units": "celsius",
+        "label": label,
+        "temps_C": None,
+        "measure": lambda fuel: (
+            None
+            if (T := d86_point(fuel, fraction)) is None
+            else _convert(T, "K", "celsius")
+        ),
+        "predict": lambda fuel, T: (
+            d86_simulated(fuel).T_vapor.max()
+            if fraction >= 1.0
+            else d86_simulated(fuel).temperature_at(fraction)
+        ),
+        "band_tol": 0.05,
+    }
+
+
+def d86_span_property(hi: float, lo: float, label: str) -> dict:
+    """Spec of the D86 temperature difference between two recovered fractions."""
+    return {
+        "units": "K",
+        "label": label,
+        "temps_C": None,
+        "measure": lambda fuel: d86_span(fuel, hi, lo, measured=True),
+        "predict": lambda fuel, T: fl.Units.Quantity(
+            d86_span(fuel, hi, lo, measured=False), "K"
+        ),
+    }
+
 
 # ASTM D7566 properties compared against measurements.
 #   data:    "Property" name in the fuel's property data
@@ -46,6 +128,8 @@ plot_path = Path(__file__).with_name("astm_accuracy.png")
 #   temps_C: target temperatures in celsius (None if not temperature dependent)
 #   predict: function (fuel, T) -> Quantity; T is a temperature in K (or None)
 #   band_tol: (optional) relative tolerance band (±) overriding `band_tol` above
+#   measure: (optional) function (fuel) -> value in `units` or None, replacing the
+#            default lookup of `data` in the fuel's property data
 astm_props = {
     "Density": {
         "data": "Density",
@@ -102,7 +186,15 @@ astm_props = {
         "temps_C": None,
         "predict": lambda fuel, T: fuel.mixture_smoke_point(fuel.Y_0),
     },
+    "Dist. T10": d86_property(0.10, "Distillation T10 [°C]"),
+    "Dist. T50": d86_property(0.50, "Distillation T50 [°C]"),
+    "Dist. T90": d86_property(0.90, "Distillation T90 [°C]"),
+    "Dist. FBP": d86_property(1.00, "Final boiling point [°C]"),
+    "Dist. T50 - T10": d86_span_property(0.50, 0.10, "T50 - T10 [K]"),
+    "Dist. T90 - T10": d86_span_property(0.90, 0.10, "T90 - T10 [K]"),
 }
+if not include_distillation:
+    astm_props = {p: s for p, s in astm_props.items() if not p.startswith("Dist.")}
 
 
 def find_fuels(data_dir: Path) -> list[str]:
@@ -176,7 +268,11 @@ for name, d in fuel_dirs.items():
     meta_names[name] = (fuel.metadata or {}).get("name", name)
     for prop, spec in astm_props.items():
         for T_target in spec["temps_C"] or [None]:
-            meas = measured_value(fuel, spec["data"], spec["units"], T_target)
+            if "measure" in spec:
+                value = spec["measure"](fuel)
+                meas = None if value is None else (value, None)
+            else:
+                meas = measured_value(fuel, spec["data"], spec["units"], T_target)
             if meas is None:
                 continue
             value, T_used = meas
@@ -252,16 +348,10 @@ for group, palette in (
 fuel_names = cat_a + cat_c + others  # Legend order: Cat A, Cat C, then the rest
 markers = ["o", "s", "^", "D"]
 ncols = 4
-nrows = int(np.ceil(len(astm_props) / ncols))
-if nrows != 2 or len(astm_props) > 2 * ncols - 1:
-    raise SystemExit("The fuel legend needs row 2, col 4 free (<= 7 properties).")
-fig, axes_grid = plt.subplots(
-    nrows, ncols, figsize=(5 * ncols, 5 * nrows), constrained_layout=True
-)
-axes = axes_grid.ravel()
-legend_ax = axes_grid[1, 3]  # Row 2, col 4
 
-for ax, (prop, spec) in zip(axes, astm_props.items()):
+
+def draw_panel(ax, prop: str, spec: dict) -> None:
+    """Draw the measured vs. predicted parity plot of one property on `ax`."""
     sub = data[data["property"] == prop]
     ax.set_title(prop, fontsize=16)
     ax.set_xlabel(f"Measured\n{spec['label']}", fontsize=12)
@@ -270,7 +360,7 @@ for ax, (prop, spec) in zip(axes, astm_props.items()):
     ax.grid(alpha=0.3)
     if sub.empty:
         ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes)
-        continue
+        return
 
     both = np.concatenate([sub["measured"], sub["predicted"]])
     pad = 0.08 * (both.max() - both.min() or 1.0)
@@ -329,22 +419,14 @@ for ax, (prop, spec) in zip(axes, astm_props.items()):
     ax.set_aspect("equal")
     ax.legend(loc="upper left", fontsize=10)
 
-for ax in axes[len(astm_props) :]:
-    ax.set_visible(False)
-
-# Fuel legend in row 2, col 4
-legend_ax.set_visible(True)
-legend_ax.axis("off")
+# Fuel legend: built from offset boxes (rather than with `legend`) so the group
+# headers are left aligned while the fuel entries are indented beneath them.
 groups = [
     ("Category A", cat_a),
     ("Category C", cat_c),
     ("Other", others),
 ]
 groups = [(title, group) for title, group in groups if group]
-
-# Built from offset boxes (rather than with `legend`) so the group headers are left
-# aligned while the fuel entries are indented beneath them. The whole block is
-# anchored at the center of the cell, so it stays centered when the window resizes.
 legend_fontsize = 16
 n_rows = 1 + sum(len(group) + 1 for _, group in groups)
 # Shrink the font if there are too many rows to fit in the cell (~300 pt tall)
@@ -370,22 +452,52 @@ def _entry(name: str) -> HPacker:
     return HPacker(children=[indent, marker, label], align="center", pad=0, sep=fs * 0.4)
 
 
-blocks = [TextArea("NJFCP Fuels", textprops={"fontsize": fs, "fontweight": "bold"})]
-for title, group in groups:
-    header = TextArea(title, textprops={"fontsize": fs})
-    entries = [_entry(n) for n in group]
-    blocks.append(
-        VPacker(children=[header, *entries], align="left", pad=0, sep=fs * 0.35)
+def draw_fuel_legend(ax) -> None:
+    """Draw the fuel legend centered in the (otherwise empty) axes `ax`."""
+    ax.set_visible(True)
+    ax.axis("off")
+    blocks = [TextArea("NJFCP Fuels", textprops={"fontsize": fs, "fontweight": "bold"})]
+    for title, group in groups:
+        header = TextArea(title, textprops={"fontsize": fs})
+        entries = [_entry(n) for n in group]
+        blocks.append(
+            VPacker(children=[header, *entries], align="left", pad=0, sep=fs * 0.35)
+        )
+    legend_box = VPacker(children=blocks, align="left", pad=0, sep=fs * 0.8)
+    # Anchored at the center of the cell, so it stays centered when the window resizes
+    ax.add_artist(
+        AnchoredOffsetbox(
+            loc="center", child=legend_box, pad=0, borderpad=0, frameon=False
+        )
     )
-legend_box = VPacker(children=blocks, align="left", pad=0, sep=fs * 0.8)
-legend_ax.add_artist(
-    AnchoredOffsetbox(
-        loc="center", child=legend_box, pad=0, borderpad=0, frameon=False
-    )
-)
 
-if save_plot:
-    fig.savefig(plot_path, dpi=300, bbox_inches="tight")
-    print(f"Saved {plot_path}")
+
+# One figure for the ASTM D7566 properties and one for distillation. Each has one
+# panel per property and the fuel legend in the last cell of the grid.
+figures = {
+    "ASTM D7566 properties": [p for p in astm_props if not p.startswith("Dist.")],
+    "Distillation": [p for p in astm_props if p.startswith("Dist.")],
+}
+for k, (fig_title, prop_names) in enumerate(figures.items()):
+    if not prop_names:
+        continue
+    nrows = int(np.ceil((len(prop_names) + 1) / ncols))
+    fig, axes_grid = plt.subplots(
+        nrows, ncols, figsize=(5 * ncols, 5 * nrows), constrained_layout=True
+    )
+    axes = axes_grid.ravel()
+    for ax, prop in zip(axes, prop_names):
+        draw_panel(ax, prop, astm_props[prop])
+    for ax in axes[len(prop_names) : -1]:
+        ax.set_visible(False)
+    draw_fuel_legend(axes[-1])
+    fig.suptitle(fig_title, fontsize=18, fontweight="bold")
+
+    if save_plot:
+        path = plot_path if k == 0 else plot_path.with_name(
+            f"{plot_path.stem}_{fig_title.lower().replace(' ', '_')}{plot_path.suffix}"
+        )
+        fig.savefig(path, dpi=300, bbox_inches="tight")
+        print(f"Saved {path}")
 if display_plot:
     plt.show()
