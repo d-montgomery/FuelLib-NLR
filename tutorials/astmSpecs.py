@@ -4,8 +4,12 @@ import numpy as np
 
 import fuellib as fl
 
-fuel_name = "posf10325"
+fuel_name = "posf11498"
 fuel_dir = None
+
+fuel_name = "eu_blind_fuel_e"
+fuel_dir = "/Users/dmontgo2/Documents/FuelLib-FuelData/fuelData"
+
 use_ref_props = True
 viscosity_corr = "Nannoolal"  # "Dutt" (Default) or "Nannoolal"
 flash_point_corr = "Alibakhshi" # "Alibakhshi" (Default) or "Alqaheem"
@@ -147,8 +151,11 @@ statuses = {prop: [row[-1] for row in rows] for prop, rows in results.items()}
 # The first option that is met is the applicable one. If none are met, every
 # option is shown so the shortfalls are visible.
 hidden = set()
-group_summary = []
-for group, options in astm_d7566_either_or.items():
+# Requirements that accompany the first entry of an option are indented in the table
+indented = {
+    p for options in astm_d7566_either_or.values() for option in options for p in option[1:]
+}
+for options in astm_d7566_either_or.values():
     option_passes = [
         all(s == "PASS" for prop in option for s in statuses[prop])
         for option in options
@@ -156,25 +163,18 @@ for group, options in astm_d7566_either_or.items():
     if any(option_passes):
         i = option_passes.index(True)
         hidden |= {p for option in options for p in option} - set(options[i])
-        group_summary.append(f"{group}: PASS (option {i + 1}: {' AND '.join(options[i])})")
-    else:
-        group_summary.append(f"{group}: FAIL (no option met)")
 
 print(header)
 print("-" * len(header))
 for prop, rows in results.items():
     if prop in hidden:
         continue
+    label = f"  {prop}" if prop in indented else prop
     for pred, lo, hi, val, T, units, status in rows:
         T_str = "-" if T is None else f"{T.to('celsius').magnitude:.1f} C"
         print(
-            f"{prop:<18}{_fmt(pred, units):>12}{_fmt(lo, units):>10}"
+            f"{label:<18}{_fmt(pred, units):>12}{_fmt(lo, units):>10}"
             f"{_fmt(hi, units):>10}{_fmt(val, units):>10}{T_str:>12}  "
             f"{f'{units:~P}':<12}{status}"
         )
-
-# Summarize requirements where one of several options must be met
-print("\nEither/or requirements:\n")
-for line in group_summary:
-    print(line)
 
