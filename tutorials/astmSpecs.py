@@ -7,7 +7,8 @@ import fuellib as fl
 fuel_name = "posf10325"
 fuel_dir = None
 use_ref_props = True
-viscosity_correlation = "Nannoolal"  # "Nannoolal" or "Dutt"
+viscosity_corr = "Nannoolal"  # "Dutt" (Default) or "Nannoolal"
+flash_point_corr = "Alibakhshi" # "Alibakhshi" (Default) or "Alqaheem"
 
 fuel = fl.Fuel(fuel_name, fuelDataDir=fuel_dir, useRefProperties=use_ref_props)
 Y = fuel.Y_0
@@ -44,9 +45,9 @@ astm_d7566_props = {
 # Map each ASTM property to a FuelLib prediction
 predictors = {
     "Density": lambda T: fuel.mixture_density(Y, T),
-    "Flash Point": lambda T: fuel.mixture_flash_point(Y),
+    "Flash Point": lambda T: fuel.mixture_flash_point(Y, correlation=flash_point_corr),
     "Freezing Point": lambda T: fuel.mixture_freeze_point(Y),
-    "Viscosity": lambda T: fuel.mixture_kinematic_viscosity(Y, T, correlation=viscosity_correlation),
+    "Viscosity": lambda T: fuel.mixture_kinematic_viscosity(Y, T, correlation=viscosity_corr),
     "YSI": lambda T: fuel.mixture_yield_sooting_index(Y),
     "Heat of Combustion": lambda T: fuel.mixture_heat_of_combustion(Y),
     "DCN": lambda T: fuel.mixture_derived_cetane_number(Y),
