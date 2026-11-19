@@ -14,8 +14,23 @@ from .core import Decomposer, GCMRegistry
 if TYPE_CHECKING:
     from ..fuel import Fuel
 
-TABLE = pd.read_csv(Path(__file__).with_suffix(".csv"), header=0, index_col=0)
+_ALL_ROWS = pd.read_csv(Path(__file__).with_suffix(".csv"), header=0, index_col=0)
+TABLE = _ALL_ROWS[_ALL_ROWS["Order"] < 3]
+"""First- and second-order group contributions (rows of the decomposition)."""
+INTERACTIONS = _ALL_ROWS[_ALL_ROWS["Order"] == 3]
+"""Group interaction contributions (counted from the first-order groups)."""
 nannoolal_gcm = GCMRegistry.register("nannoolal", property_fns=[])
+
+# Non-additive group families: family -> first-order groups that belong to it
+NON_ADDITIVE_GROUPS = {
+    "OH": ("-OH (<C5)", "-OH (>C4)", "-OH (sec)"),
+    "OH(a)": ("HO-(C(a))",),
+}
+# Interaction group name (row of INTERACTIONS) -> interacting non-additive families
+INTERACTION_PAIRS = {
+    "OH-OH": ("OH", "OH"),
+    "OH(a)-OH(a)": ("OH(a)", "OH(a)"),
+}
 
 
 def _get_row(property_name: str) -> types.Array1D:
@@ -36,17 +51,75 @@ def _get_row(property_name: str) -> types.Array1D:
     return TABLE[property_name].to_numpy(dtype=float)
 
 
-def _get_decomp(fuel: "Fuel") -> types.Array2D:
-    """Organize the decomposition matrix for the fuel and convert it to a numpy array.
+def _heavy_atom_counts(fuel: "Fuel") -> types.Array1D:
+    """Count the non-hydrogen atoms of each component of the fuel.
 
     Args:
-        fuel: The fuel object containing the decomposition matrix.
+        fuel: The fuel object containing the component molecules.
 
     Returns:
-        The decomposition matrix as a 2D numpy array.
+        The number of non-hydrogen atoms (n) of each component.
     """
-    decomp = fuel._nannoolal_decomp.reindex(columns=TABLE.index, fill_value=0)
-    return decomp.to_numpy()
+    return np.array([m.GetNumHeavyAtoms() for m in fuel.comps.rdkit_mols], dtype=float)
+
+
+def _group_interaction(
+    decomp: pd.DataFrame, property_name: str, n: types.Array1D, f_gi: float
+) -> types.Array1D:
+    """Compute the group interaction contribution GI (Nannoolal Eq. 3 and Eq. 10).
+
+    Args:
+        decomp: Group decomposition (components in rows, groups in columns).
+        property_name: Name of the column of INTERACTIONS to use.
+        n: Number of non-hydrogen atoms of each component.
+        f_gi: Scaling factor (2 for Tv, 1 for dBv).
+
+    Returns:
+        The group interaction contribution of each component. It is zero for
+        components with fewer than two non-additive groups.
+    """
+    counts = decomp.reindex(columns=TABLE.index, fill_value=0)
+    families = {
+        family: counts.reindex(columns=list(groups), fill_value=0)
+        .sum(axis=1)
+        .to_numpy(dtype=float)
+        for family, groups in NON_ADDITIVE_GROUPS.items()
+    }
+    m = sum(families.values())
+
+    pair_sum = np.zeros_like(m)
+    for name, (fam_i, fam_j) in INTERACTION_PAIRS.items():
+        k_i, k_j = families[fam_i], families[fam_j]
+        pairs = k_i * (k_i - 1) / 2 if fam_i == fam_j else k_i * k_j
+        pair_sum += np.where(
+            pairs != 0, pairs * INTERACTIONS.loc[name, property_name], 0.0
+        )
+
+    # Each interaction appears twice in the double sum of Eq. 3 (C_i-j = C_j-i)
+    denom = np.where(m > 1, m - 1, 1.0)
+    return np.where(m > 1, f_gi / n * 2 * pair_sum / denom, 0.0)
+
+
+def _contribution_sum(
+    decomp: pd.DataFrame, property_name: str, n: types.Array1D, f_gi: float
+) -> types.Array1D:
+    """Sum the group contributions and the group interaction contribution.
+
+    Args:
+        decomp: Group decomposition (components in rows, groups in columns).
+        property_name: Name of the property column in the GCM table.
+        n: Number of non-hydrogen atoms of each component.
+        f_gi: Scaling factor of the group interaction contribution.
+
+    Returns:
+        The sum of the group contributions plus GI for each component.
+    """
+    nij = decomp.reindex(columns=TABLE.index, fill_value=0).to_numpy()
+    xj = _get_row(property_name)
+    _check_compatible_dims(xj, nij)
+    # Only absent groups are zeroed; NaN propagates for used, unsupported groups
+    xi = np.where(nij != 0, nij * xj, 0.0).sum(axis=1)
+    return xi + _group_interaction(decomp, property_name, n, f_gi)
 
 
 def _check_compatible_dims(
@@ -87,6 +160,13 @@ order1_groups = [
     (60, ">C(r)=C(r)<", "[C]=@[C]"),
     (61, "-C#C-", "[CH0]#[CH0]"),
     (62, ">C(c)=C(c)<", "[C;!H2]=!@[C;!H2]"),
+    # Alcohols: only the O atom is matched; the carbinol carbon is matched separately.
+    # Primary alcohols are "-OH (>C4)" and are reassigned to "-OH (<C5)" in
+    # `NannoolalDecomposer.first_order_counts` if the molecule has fewer than five C.
+    (88, "-OH (>C4)", "[OX2H1;$(O[CX4;H2,H3])]"),
+    (89, "HO-(C(a))", "[OX2H1;$(O[c])]"),
+    (90, "-OH (sec)", "[OX2H1;$(O[CX4H1]([#6])[#6])]"),
+    (91, "-OH (tert)", "[OX2H1;$(O[CX4D4])]"),
     (103, "CH3-(e)", f"[CH3;{E}]"),
     (104, "CH3-(a)", "[CH3;$(*~a)]"),
     (105, "CH3-(ne)", f"[CH3;!{E}]"),
@@ -124,6 +204,25 @@ PAIR_GROUPS = {1: "Ortho-pair(s)", 2: "Meta-pair(s)", 3: "Para-pair(s)"}
 
 class NannoolalDecomposer(Decomposer):
     """Decomposer for first and second order Nannoolal groups."""
+
+    def first_order_counts(self, mol: Chem.Mol, smiles: str) -> dict[str, int]:
+        """Count first order groups, assigning short-chain primary alcohols.
+
+        Primary alcohols are matched as "-OH (>C4)" and are reassigned to "-OH (<C5)"
+        if the molecule has fewer than five carbons.
+
+        Args:
+            mol: The parsed molecule.
+            smiles: The SMILES string being decomposed, used in error messages.
+
+        Returns:
+            A mapping of first order group name to its number of occurrences.
+        """
+        counts = super().first_order_counts(mol, smiles)
+        n_carbons = sum(atom.GetSymbol() == "C" for atom in mol.GetAtoms())
+        if n_carbons < 5 and "-OH (>C4)" in counts:
+            counts["-OH (<C5)"] = counts.pop("-OH (>C4)")
+        return counts
 
     def second_order_counts(self, mol: Chem.Mol, smiles: str) -> dict[str, int]:
         """Count second order groups, hydrogen counts, rings, and aromatic pairs.
@@ -198,14 +297,12 @@ def dBv(fuel: "Fuel") -> types.Quantity1D:
 
     Returns:
         The dimensionless group contribution sums for the saturated liquid
-        viscosity curve slope (dBv) of the fuel's components.
+        viscosity curve slope (dBv) of the fuel's components, including the group
+        interaction contribution (Nannoolal Eq. (10) with f_GI = 1).
         Converting these sums into dBv requires Nannoolal Eq. (7).
     """
-    nij = _get_decomp(fuel)
-    dBvj = _get_row("dBv")
-    _check_compatible_dims(dBvj, nij)
-    # Only absent groups are zeroed; NaN propagates for used, unsupported groups
-    dBvi = np.where(nij != 0, nij * dBvj, 0.0).sum(axis=1)
+    n = _heavy_atom_counts(fuel)
+    dBvi = _contribution_sum(fuel._nannoolal_decomp, "dBv", n, 1.0)
     return Units.Quantity(dBvi, "")
 
 
@@ -218,11 +315,10 @@ def Tv(fuel: "Fuel") -> types.Quantity1D:
 
     Returns:
         The dimensionless group contribution sums for the saturated liquid
-        viscosity reference temperature (Tv) of the fuel's components.
+        viscosity reference temperature (Tv) of the fuel's components, including
+        the group interaction contribution (Nannoolal Eq. (10) with f_GI = 2).
         Converting these sums into Tv in K requires Nannoolal Eq. (8).
     """
-    nij = _get_decomp(fuel)
-    Tvj = _get_row("Tv")
-    _check_compatible_dims(Tvj, nij)
-    Tvi = np.where(nij != 0, nij * Tvj, 0.0).sum(axis=1)
+    n = _heavy_atom_counts(fuel)
+    Tvi = _contribution_sum(fuel._nannoolal_decomp, "Tv", n, 2.0)
     return Units.Quantity(Tvi, "")

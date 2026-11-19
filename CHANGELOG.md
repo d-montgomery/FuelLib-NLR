@@ -7,6 +7,10 @@ release workflow to parse release entries in this file.
 
 ## [Unreleased]
 
+### Added
+- Alcohol and phenol groups (`-OH (<C5)`, `-OH (>C4)`, `-OH (sec)`, `-OH (tert)`, `HO-(C(a))`) and the `OH-OH` and `OH(a)-OH(a)` group interaction terms for the Nannoolal viscosity method. The normal boiling point is still estimated with Gani.
+- Gani SMARTS for the `OH` and `ACOH` first-order groups and the `CHOH`, `COH`, `CHm(OH)CHn(OH), m,n in (0,2)`, and `CHm cyclic-OH, m in (0,1)` second-order groups, so alcohols and phenols can be decomposed with the Gani method.
+
 ## [3.2.0] - 2026-11-16
 
 ### Added

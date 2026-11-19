@@ -215,7 +215,16 @@ are registered:
   :math:`\sum_k \mathbf{N}_{ik} t_{v,k}` for the viscosity reference
   temperature.
 
-Both are dimensionless sums. The corrections for the number of heavy atoms
+Both include the group interaction term :math:`GI` of Nannoolal et al.\ for
+compounds with non-additive groups (hydroxyl groups):
+:math:`GI = (f/n) \sum_i \sum_j C_{ij} / (m - 1)`, with :math:`f = 1` for
+``dBv`` and :math:`f = 2` for ``Tv``, :math:`n` the number of heavy atoms, and
+:math:`m` the number of non-additive group instances. The interaction
+parameters :math:`C_{ij}` are the ``Order`` 3 rows of ``nannoolal.csv``
+(``OH-OH`` and ``OH(a)-OH(a)``), which are not groups and are excluded from the
+decomposition. The alcohol groups are ``-OH (<C5)``, ``-OH (>C4)``,
+``-OH (sec)``, ``-OH (tert)``, and ``HO-(C(a))`` (phenol). Both are
+otherwise dimensionless sums. The corrections for the number of heavy atoms
 and the normal boiling point are applied by
 :func:`~fuellib.correlate.components.viscosity_dynamic_nannoolal` (see
 :doc:`fuelprops`). The decomposition matrix :math:`\mathbf{N}` contains both

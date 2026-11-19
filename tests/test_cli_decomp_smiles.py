@@ -74,17 +74,17 @@ def test_names_failing_molecule_in_multi_input_error(
             "fl-decomp-smiles",
             "--smiles",
             "CCCCCCC",
-            "CCCCCCCO",
+            "CCCCCCCS",
             "--name",
             "n-heptane",
-            "1-heptanol",
+            "1-heptanethiol",
             "--method",
             "gani",
         ]
     else:
         input_path = tmp_path / "compounds.csv"
         input_path.write_text(
-            "Reference Compound,SMILES\nn-heptane,CCCCCCC\n1-heptanol,CCCCCCCO\n"
+            "Reference Compound,SMILES\nn-heptane,CCCCCCC\n1-heptanethiol,CCCCCCCS\n"
         )
         arguments = ["fl-decomp-smiles", "--input", str(input_path), "--method", "gani"]
 
@@ -97,8 +97,8 @@ def test_names_failing_molecule_in_multi_input_error(
     captured = capsys.readouterr()
     assert captured.out == ""
     assert captured.err.strip() == (
-        "Error decomposing '1-heptanol': "
-        "Gani decomposition failed for SMILES 'CCCCCCCO': "
+        "Error decomposing '1-heptanethiol': "
+        "Gani decomposition failed for SMILES 'CCCCCCCS': "
         "first-order groups matched 7 of 8 atoms."
     )
 
@@ -112,7 +112,7 @@ def test_unnamed_failure_does_not_repeat_the_smiles(
 ):
     """Without --name the label equals the SMILES, so no label prefix is added."""
     monkeypatch.setattr(
-        sys, "argv", ["fl-decomp-smiles", "-s", "CCCCCCCO", "-m", method]
+        sys, "argv", ["fl-decomp-smiles", "-s", "CCCCCCCS", "-m", method]
     )
 
     with pytest.raises(SystemExit) as error:
@@ -122,7 +122,7 @@ def test_unnamed_failure_does_not_repeat_the_smiles(
     captured = capsys.readouterr()
     assert captured.out == ""
     assert captured.err.strip() == (
-        f"Error: {prefix} decomposition failed for SMILES 'CCCCCCCO': "
+        f"Error: {prefix} decomposition failed for SMILES 'CCCCCCCS': "
         "first-order groups matched 7 of 8 atoms."
     )
 

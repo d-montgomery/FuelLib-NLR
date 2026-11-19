@@ -73,6 +73,7 @@ def _check_compatible_dims(
 
 # Groups organized by priority (highest to lowest)
 order1_groups = [
+    ("ACOH", "c-[OX2H1]"),
     ("ACCH3", "c-[CH3]"),
     ("ACCH2", "c-[CH2]"),
     ("ACCH", "c-[CH1]"),
@@ -85,10 +86,22 @@ order1_groups = [
     ("CH2=C", "[CH2]=[CH0]"),
     ("CH=CH", "[CH1]=[CH1]"),
     ("CH=C", "[CH1]=[CH0]"),
+    ("OH", "[OX2H1]"),
     ("CH3", "[CH3]"),
     ("CH2", "[CH2]"),
     ("CH", "[CH1]"),
     ("C", "[CH0]"),
+]
+# Hydroxyl second order groups overlap the hydrocarbon second order groups (for
+# example, 2-propanol has both (CH3)2CH and CHOH), so they are matched separately.
+order2_alcohol_groups = [
+    (
+        "CHm(OH)CHn(OH), m,n in (0,2)",
+        "[OX2H1][CX4;H0,H1,H2][CX4;H0,H1,H2][OX2H1]",
+    ),
+    ("CHm cyclic-OH, m in (0,1)", "[OX2H1][CX4;R;H0,H1]"),
+    ("CHOH", "[OX2H1][CX4;H1]"),
+    ("COH", "[OX2H1][CX4;H0]"),
 ]
 order2_groups = [
     ("CH3CH3", "[CH3][CH3]"),
@@ -118,16 +131,17 @@ class GaniDecomposer(Decomposer):
         Returns:
             A mapping of second order group name to its number of occurrences.
         """
-        matched: set[int] = set()
         counts: dict[str, int] = {}
 
-        for group, smarts in order2_groups:
-            query = self.parse_smarts(smiles, smarts)
-            for match in mol.GetSubstructMatches(query):
-                if matched.intersection(match):
-                    continue
-                matched.update(match)
-                counts[group] = counts.get(group, 0) + 1
+        for groups in (order2_groups, order2_alcohol_groups):
+            matched: set[int] = set()
+            for group, smarts in groups:
+                query = self.parse_smarts(smiles, smarts)
+                for match in mol.GetSubstructMatches(query):
+                    if matched.intersection(match):
+                        continue
+                    matched.update(match)
+                    counts[group] = counts.get(group, 0) + 1
 
         # Count each non-aromatic ring once (rings may share atoms in fused systems)
         ring_info = mol.GetRingInfo()

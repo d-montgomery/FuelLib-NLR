@@ -39,9 +39,9 @@ def test_decompose_reports_unparsable_smiles(decompose, method):
 def test_decompose_reports_unmatched_atoms(decompose, method):
     """Unsupported atoms should report how many atoms the groups covered."""
     with pytest.raises(ValueError) as error:
-        decompose("CCCCCCCO")
+        decompose("CCCCCCCS")
     assert str(error.value) == (
-        f"{method} decomposition failed for SMILES 'CCCCCCCO': "
+        f"{method} decomposition failed for SMILES 'CCCCCCCS': "
         "first-order groups matched 7 of 8 atoms."
     )
 

@@ -233,19 +233,30 @@ class GaniHelperFunctionTestCase(unittest.TestCase):
 class GaniReferenceDecompositionTestCase(unittest.TestCase):
     """Verify RDKit CG decompositions against the bundled reference data."""
 
-    def test_alcohols_fail_closed_with_smiles_and_unmatched_atom_count(self):
-        """Unsupported alcohols name the Gani method, input, and uncovered oxygen."""
-        for carbon_count in range(7, 13):
-            with self.subTest(carbon_count=carbon_count):
-                smiles = "C" * carbon_count + "O"
-                message = (
-                    f"Gani decomposition failed for SMILES '{smiles}': first-order "
-                    f"groups matched {carbon_count} of {carbon_count + 1} atoms."
-                )
-
-                with self.assertRaises(ValueError) as error:
-                    decompose(smiles)
-                self.assertEqual(str(error.exception), message)
+    def test_alcohol_decomposition(self):
+        """Alcohols decompose into hydroxyl groups and their second order groups."""
+        cases = {
+            "CCCCCCCO": {"CH3": 1, "CH2": 6, "OH": 1},
+            "CC(C)O": {"CH3": 2, "CH": 1, "OH": 1, "(CH3)2CH": 1, "CHOH": 1},
+            "CC(C)(C)O": {"CH3": 3, "C": 1, "OH": 1, "(CH3)3C": 1, "COH": 1},
+            "OCCO": {
+                "CH2": 2,
+                "OH": 2,
+                "CHm(OH)CHn(OH), m,n in (0,2)": 1,
+            },
+            "OC1CCCCC1": {
+                "CH2": 5,
+                "CH": 1,
+                "OH": 1,
+                "6 membered ring": 1,
+                "CHm cyclic-OH, m in (0,1)": 1,
+            },
+            "Oc1ccccc1": {"ACH": 5, "ACOH": 1},
+        }
+        for smiles, expected in cases.items():
+            with self.subTest(smiles=smiles):
+                counts = decompose(smiles).iloc[0]
+                self.assertEqual(counts[counts != 0].astype(int).to_dict(), expected)
 
     def test_reference_decomposition(self):
         """Test that the RDKit decomposition matches tabulated Gani data."""
