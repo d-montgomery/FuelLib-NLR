@@ -1,19 +1,27 @@
 """Compare FuelLib predictions against ASTM D7566 specification limits."""
 
 import numpy as np
+import pandas as pd
 
 import fuellib as fl
 from fuellib.simulate.distillation import greenfield
 
-fuel_name = "posf10325"
-fuel_dir = None
+#fuel_name = "posf10325"
+#fuel_dir = None
+
+fuel_name = ["eu_blind_fuel_a", "eu_blind_fuel_b", "eu_blind_fuel_d", "eu_blind_fuel_e"]
+fuel_dir = "/Users/dmontgo2/Documents/FuelLib-FuelData/fuelData"
 
 use_ref_props = True
+show_pass_fail = False
+show_astm_limits = True
 viscosity_corr = "Nannoolal"  # "Dutt" (Default) or "Nannoolal"
 flash_point_corr = "Alibakhshi" # "Alibakhshi" (Default) or "Alqaheem"
+save_xlsx = True  # Write the table to xlsx (one column per fuel)
+xlsx_file = "eu_blind_fuels_astm_d7566_results.xlsx"
 
-fuel = fl.Fuel(fuel_name, fuelDataDir=fuel_dir, useRefProperties=use_ref_props)
-Y = fuel.Y_0
+if isinstance(fuel_name, str):
+    fuel_name = [fuel_name]
 
 # ASTM D7566 properties
 astm_d7566_props = {
@@ -80,35 +88,34 @@ astm_d7566_either_or = {
     ],
 }
 
-_d86_cache = {}
+def make_predictors(fuel, Y):
+    """Map each ASTM property to a FuelLib prediction for the given fuel."""
+    d86_cache = {}
 
+    def d86():
+        """Simulate the D86 distillation curve once and reuse it."""
+        if "result" not in d86_cache:
+            d86_cache["result"] = greenfield.distill(fuel, Y)
+        return d86_cache["result"]
 
-def d86():
-    """Simulate the D86 distillation curve once and reuse it."""
-    if "result" not in _d86_cache:
-        _d86_cache["result"] = greenfield.distill(fuel, Y)
-    return _d86_cache["result"]
-
-
-# Map each ASTM property to a FuelLib prediction
-predictors = {
-    "Density": lambda T: fuel.mixture_density(Y, T),
-    "Flash Point": lambda T: fuel.mixture_flash_point(Y, correlation=flash_point_corr),
-    "Freezing Point": lambda T: fuel.mixture_freeze_point(Y),
-    "Viscosity": lambda T: fuel.mixture_kinematic_viscosity(Y, T, correlation=viscosity_corr),
-    "YSI": lambda T: fuel.mixture_yield_sooting_index(Y),
-    "Heat of Combustion": lambda T: fuel.mixture_heat_of_combustion(Y),
-    "DCN": lambda T: fuel.mixture_derived_cetane_number(Y),
-    "Smoke Point (1)": lambda T: fuel.mixture_smoke_point(Y),
-    "Smoke Point (2)": lambda T: fuel.mixture_smoke_point(Y),
-    "Naphthalenes (2)": lambda T: fuel.mixture_naphthalenes_content(Y),
-    "Dist. T10": lambda T: d86().temperature_at(0.10),
-    "Dist. T50": lambda T: d86().temperature_at(0.50),
-    "Dist. T90": lambda T: d86().temperature_at(0.90),
-    "Dist. FBP": lambda T: d86().T_vapor.to("K").max(),
-    "Dist. T50 - T10": lambda T: d86().temperature_at(0.50) - d86().temperature_at(0.10),
-    "Dist. T90 - T10": lambda T: d86().temperature_at(0.90) - d86().temperature_at(0.10),
-}
+    return {
+        "Density": lambda T: fuel.mixture_density(Y, T),
+        "Flash Point": lambda T: fuel.mixture_flash_point(Y, correlation=flash_point_corr),
+        "Freezing Point": lambda T: fuel.mixture_freeze_point(Y),
+        "Viscosity": lambda T: fuel.mixture_kinematic_viscosity(Y, T, correlation=viscosity_corr),
+        "YSI": lambda T: fuel.mixture_yield_sooting_index(Y),
+        "Heat of Combustion": lambda T: fuel.mixture_heat_of_combustion(Y),
+        "DCN": lambda T: fuel.mixture_derived_cetane_number(Y),
+        "Smoke Point (1)": lambda T: fuel.mixture_smoke_point(Y),
+        "Smoke Point (2)": lambda T: fuel.mixture_smoke_point(Y),
+        "Naphthalenes (2)": lambda T: fuel.mixture_naphthalenes_content(Y),
+        "Dist. T10": lambda T: d86().temperature_at(0.10),
+        "Dist. T50": lambda T: d86().temperature_at(0.50),
+        "Dist. T90": lambda T: d86().temperature_at(0.90),
+        "Dist. FBP": lambda T: d86().T_vapor.to("K").max(),
+        "Dist. T50 - T10": lambda T: d86().temperature_at(0.50) - d86().temperature_at(0.10),
+        "Dist. T90 - T10": lambda T: d86().temperature_at(0.90) - d86().temperature_at(0.10),
+    }
 
 
 def _as_list(quantity, n):
@@ -130,7 +137,7 @@ def _fmt(quantity, units):
     return f"{quantity.to(units).magnitude:.2f}"
 
 
-def evaluate(prop, criteria):
+def evaluate(prop, criteria, predictors):
     """Yield one result row per temperature for a property."""
     if prop not in predictors:
         raise KeyError(f"No FuelLib predictor defined for {prop!r}.")
@@ -171,45 +178,106 @@ def evaluate(prop, criteria):
         yield pred, lo, hi, val, T, units, status
 
 
-# Check ASTM D7566 properties
-header = (
-    f"{'Property':<18}{'FuelLib':>12}{'Min':>10}{'Max':>10}{'Value':>10}"
-    f"{'T':>12}  {'Units':<10}Status"
-)
-print(f"\nASTM D7566 properties for fuel: {fuel.name}\n")
-results = {
-    prop: list(evaluate(prop, criteria)) for prop, criteria in astm_d7566_props.items()
-}
-statuses = {prop: [row[-1] for row in rows] for prop, rows in results.items()}
-
-# Resolve either/or requirements: hide rows of options that do not apply.
-# The first option that is met is the applicable one. If none are met, every
-# option is shown so the shortfalls are visible.
-hidden = set()
 # Requirements that accompany the first entry of an option are indented in the table
 indented = {
     p for options in astm_d7566_either_or.values() for option in options for p in option[1:]
 }
-for options in astm_d7566_either_or.values():
-    option_passes = [
-        all(s == "PASS" for prop in option for s in statuses[prop])
-        for option in options
-    ]
-    if any(option_passes):
-        i = option_passes.index(True)
-        hidden |= {p for option in options for p in option} - set(options[i])
 
-print(header)
-print("-" * len(header))
-for prop, rows in results.items():
-    if prop in hidden:
-        continue
-    label = f"  {prop}" if prop in indented else prop
-    for pred, lo, hi, val, T, units, status in rows:
-        T_str = "-" if T is None else f"{T.to('celsius').magnitude:.1f} C"
-        print(
-            f"{label:<18}{_fmt(pred, units):>12}{_fmt(lo, units):>10}"
-            f"{_fmt(hi, units):>10}{_fmt(val, units):>10}{T_str:>12}  "
-            f"{f'{units:~P}':<12}{status}"
-        )
+
+def hidden_props(results):
+    """Return the smoke point properties that do not apply to this fuel.
+
+    The predicted naphthalenes content relative to its limit decides: above the
+    limit, hide Smoke Point (1); otherwise, hide Smoke Point (2) and Naphthalenes (2).
+    """
+    naph_pred, _, naph_max, _, _, _, _ = results["Naphthalenes (2)"][0]
+    if naph_pred > naph_max:
+        return {"Smoke Point (1)"}
+    return {"Smoke Point (2)", "Naphthalenes (2)"}
+
+
+def print_table(name, results, hidden):
+    """Print the results table for one fuel."""
+    header = (
+        f"{'Property':<18}{'FuelLib':>12}"
+        + (f"{'Min':>10}{'Max':>10}" if show_astm_limits else "")
+        + f"{'Value':>10}{'T':>12}  {'Units':<12}{'Status' if show_pass_fail else ''}"
+    ).rstrip()
+    print(f"\nASTM D7566 properties for fuel: {name}\n")
+    print(header)
+    print("-" * len(header))
+    for prop, rows in results.items():
+        if prop in hidden:
+            continue
+        label = f"  {prop}" if prop in indented else prop
+        for pred, lo, hi, val, T, units, status in rows:
+            T_str = "-" if T is None else f"{T.to('celsius').magnitude:.1f} C"
+            limits = (
+                f"{_fmt(lo, units):>10}{_fmt(hi, units):>10}" if show_astm_limits else ""
+            )
+            print(
+                (
+                    f"{label:<18}{_fmt(pred, units):>12}{limits}"
+                    f"{_fmt(val, units):>10}{T_str:>12}  "
+                    f"{f'{units:~P}':<12}{status if show_pass_fail else ''}"
+                ).rstrip()
+            )
+
+
+def _num(quantity, units):
+    """Return the magnitude of a Quantity in `units`, or None if missing."""
+    return None if quantity is None else float(quantity.to(units).magnitude)
+
+
+def write_xlsx(all_results, path):
+    """Write one table to xlsx, with a column of predictions for each fuel."""
+    # Property order, limits, and temperatures are the same for every fuel
+    reference = next(iter(all_results.values()))[0]
+    rows = []
+    for prop, prop_rows in reference.items():
+        if all(prop in hidden for _, hidden in all_results.values()):
+            continue
+        label = f"  {prop}" if prop in indented else prop
+        for i, (_, lo, hi, val, T, units, _) in enumerate(prop_rows):
+            row = {
+                "Property": label,
+                "Units": f"{units:~P}",
+                "T (C)": _num(T, "celsius"),
+            }
+            if show_astm_limits:
+                row["Min"] = _num(lo, units)
+                row["Max"] = _num(hi, units)
+            row["Value"] = _num(val, units)
+            for name, (results, hidden) in all_results.items():
+                applies = prop not in hidden
+                pred, *_, status = results[prop][i]
+                row[name] = _num(pred, units) if applies else None
+                if show_pass_fail:
+                    row[f"{name} Status"] = status if applies else None
+            rows.append(row)
+
+    sheet = "ASTM D7566"
+    with pd.ExcelWriter(path, engine="openpyxl") as writer:
+        pd.DataFrame(rows).to_excel(writer, sheet_name=sheet, index=False)
+        for column in writer.sheets[sheet].columns:
+            width = max(len(str(c.value)) for c in column if c.value is not None)
+            writer.sheets[sheet].column_dimensions[column[0].column_letter].width = width + 2
+    print(f"\nWrote {path}")
+
+
+# Check ASTM D7566 properties for each fuel
+all_results = {}
+for name in fuel_name:
+    fuel = fl.Fuel(name, fuelDataDir=fuel_dir, useRefProperties=use_ref_props)
+    predictors = make_predictors(fuel, fuel.Y_0)
+    results = {
+        prop: list(evaluate(prop, criteria, predictors))
+        for prop, criteria in astm_d7566_props.items()
+    }
+    hidden = hidden_props(results)
+    all_results[name] = (results, hidden)
+    print_table(fuel.name, results, hidden)
+
+if save_xlsx:
+    write_xlsx(all_results, xlsx_file)
 
